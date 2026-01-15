@@ -1,5 +1,5 @@
 {
     "version": "5.9",
-    "url": "https://github.com/Gollumix/makarclicker/blob/main/update.json",
-    "changelog": "Dodano nowe funkcje i poprawiono stabilność."
+    "url": "https://github.com/Gollumix/makarclicker/releases/download/Update/Makar.Clicker.v5.9.exe",
+    "changelog": "Poprawiono stabilność. Dodano opcję autoaktualizacji. Optymalizacje kodu."
 }
