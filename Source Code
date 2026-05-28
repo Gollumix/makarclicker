@@ -1,117 +1,158 @@
+// === MAKAR CLICKER - Win32 AutoClicker ===
+// Comments in English
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 
-#include <windows.h>
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <shellapi.h>   
-#include <dwmapi.h>
-#include <objidl.h>
-#include <gdiplus.h>
-#include <thread>
-#include <chrono>
-#include <vector>
-#include <string>
-#include <algorithm>
-#include <winhttp.h>
-#include <timeapi.h> 
-#include <random>
-#include <psapi.h>
-#include <cmath>
+// === Windows system libraries ===
+#include <windows.h>       // Core Windows API (windows, messages, registry)
+#include <winsock2.h>      // Windows sockets (IP fetching)
+#include <ws2tcpip.h>      // Winsock extensions (inet_ntop)
+#include <shellapi.h>      // Process launch (ShellExecute)
+#include <dwmapi.h>        // Windows DWM (rounded window corners)
+#include <objidl.h>        // COM interfaces (clipboard)
+#include <gdiplus.h>       // GDI+ (graphics, font rendering)
+#include <thread>          // C++ threads (std::thread)
+#include <chrono>          // C++ time (delays, measurements)
+#include <vector>          // Dynamic arrays
+#include <string>          // Strings
+#include <algorithm>       // Algorithms (std::clamp, std::all_of)
+#include <winhttp.h>       // HTTP/HTTPS (update checking)
+#include <timeapi.h>       // High-resolution timing (timeBeginPeriod)
+#include <random>          // Random number generator (click simulation)
+#include <psapi.h>         // Process/system info (RAM, CPU)
+#include <cmath>           // Math functions (sin, sqrt, pow)
+#include <atomic>          // Atomic variables (threads)
+#include <mutex>           // Mutex (thread synchronization)
 
-#pragma comment(lib, "winmm.lib") 
-#pragma comment(lib, "winhttp.lib")
-#pragma comment(lib, "dwmapi.lib")
-#pragma comment(lib, "gdiplus.lib")
-#pragma comment(lib, "user32.lib")
-#pragma comment(lib, "shell32.lib")
-#pragma comment(lib, "advapi32.lib") 
-#pragma comment(lib, "ws2_32.lib")
+// === Static libraries (linker) ===
+#pragma comment(lib, "winmm.lib")   // Multimedia (timeBeginPeriod)
+#pragma comment(lib, "winhttp.lib")  // WinHTTP (updates)
+#pragma comment(lib, "dwmapi.lib")   // DWM (window appearance)
+#pragma comment(lib, "gdiplus.lib")  // GDI+ (graphics)
+#pragma comment(lib, "user32.lib")   // User32 (windows, input)
+#pragma comment(lib, "shell32.lib")  // Shell (ShellExecute)
+#pragma comment(lib, "advapi32.lib") // Advanced Services (registry)
+#pragma comment(lib, "ws2_32.lib")   // Winsock (network)
 
 using namespace Gdiplus;
 
-const std::wstring CURRENT_VERSION = L"6.9";
-const std::wstring BUILD_ID = L"MK-992-X";
-const std::string B_DATE = __DATE__;
-const std::string B_TIME = __TIME__;
-const std::wstring UPDATE_JSON_URL = L"https://raw.githubusercontent.com/Gollumix/makarclicker/refs/heads/main/update.json";
+// === Version and identification constants ===
+const std::wstring CURRENT_VERSION = L"7.0";   // Current program version
+const std::wstring BUILD_ID = L"MK-997-X";     // Build ID
+const std::string B_DATE = __DATE__;            // Compilation date
+const std::string B_TIME = __TIME__;            // Compilation time
 
-std::wstring g_newVersion = L"";
-std::wstring g_downloadUrl = L"";
 
-#define WM_SHOW_UPDATE (WM_USER + 100)
-const int WIN_WIDTH = 550;
-const int WIN_HEIGHT_SMALL = 540;
-const int WIN_HEIGHT_LARGE = 750;
-const int TOP_BAR_HEIGHT = 35;
+// === Update URL ===
+const std::wstring DEFAULT_UPDATE_URL = L"https://raw.githubusercontent.com/Gollumix/makarclicker/refs/heads/main/update.json";
+std::wstring UPDATE_JSON_URL = DEFAULT_UPDATE_URL;  // Can be changed to a custom server
 
+// === Update data variables ===
+std::wstring g_newVersion = L"";     // New version (if available)
+std::wstring g_downloadUrl = L"";    // Download URL for new version
+
+// === Window constants ===
+#define WM_SHOW_UPDATE (WM_USER + 100)  // Custom message - show update window
+const int WIN_WIDTH = 550;              // Window width
+const int WIN_HEIGHT_SMALL = 560;       // Window height (basic mode)
+const int WIN_HEIGHT_LARGE = 760;       // Window height (debug mode)
+const int TOP_BAR_HEIGHT = 35;          // Title bar height
+
+// === Particle structure ===
 struct Particle { float x, y, vx, vy; };
-bool g_isClicking = false;
-bool g_showDebug = false;
-int  g_bridgeMode = 0;
-float g_cps = 14.0f;
-std::wstring g_licenseUser = L"MAKAR";
-std::wstring g_computerName = L"Unknown";
-std::wstring g_ipAddress = L"0.0.0.0";
-std::wstring g_cpuInfo = L"Loading CPU...";
-std::wstring g_gpuInfo = L"Loading GPU...";
-std::wstring g_ramInfo = L"Loading RAM...";
-int g_cpuLoad = 0, g_ramLoad = 0;
 
-std::vector<ULONGLONG> g_clickTimestamps;
-float g_realCPS = 0.0f;
+// === Program state globals ===
+std::atomic<bool> g_isClicking{false};   // Is PVP clicker enabled (atomic - threads)
+bool g_showDebug = false;                 // Show debug panel
+std::atomic<int> g_bridgeMode{0};        // Bridge mode (0=OFF..12=ICL)
+std::atomic<float> g_cps{14.0f};         // Set CPS (default 14)
+std::atomic<bool> g_appRunning{true};    // App running flag (for thread cleanup)
+std::wstring g_licenseUser = L"MAKAR";  // License/username
 
-UINT g_bindPVP = VK_F6, g_bindBridge = VK_F7;
-bool g_isBindingPVP = false, g_isBindingBridge = false;
-bool g_isDraggingSlider = false;
-POINT g_mousePos = { 0, 0 };
-std::vector<Particle> g_particles;
-HWND g_mainHwnd = NULL;
+// === Hardware and system info ===
+std::wstring g_computerName = L"Unknown"; // Computer name
+std::wstring g_ipAddress = L"0.0.0.0";    // IP address
+std::wstring g_cpuInfo = L"Loading CPU..."; // CPU name
+std::wstring g_gpuInfo = L"Loading GPU..."; // GPU name
+std::wstring g_ramInfo = L"Loading RAM..."; // RAM info
+int g_cpuLoad = 0, g_ramLoad = 0;          // CPU and RAM load in %
 
-BYTE g_windowAlpha = 230; 
+// === Real CPS measurement ===
+std::vector<ULONGLONG> g_clickTimestamps;  // Click timestamps (from last second)
+std::mutex g_tsMutex;                      // Mutex protecting timestamp access
+float g_realCPS = 0.0f;                    // Actual CPS (calculated from timestamps)
 
+// === Key bindings ===
+UINT g_bindPVP = VK_F6, g_bindBridge = VK_F7;  // Keys for switching modes
+bool g_isBindingPVP = false, g_isBindingBridge = false; // Are we waiting for a key press
 
-bool g_showSettingsMenu = false;
-RectF g_menuRect(15.0f, 40.0f, 180.0f, 160.0f);
+// === Slider and particles ===
+bool g_isDraggingSlider = false;          // Is CPS slider being dragged
+POINT g_mousePos = { 0, 0 };             // Current mouse position
+std::vector<Particle> g_particles;        // Particles (visual effect)
+HWND g_mainHwnd = NULL;                   // Main window handle
 
+// === Window transparency ===
+BYTE g_windowAlpha = 230;  // Transparency level (0-255)
+
+// === Settings menu ===
+bool g_showSettingsMenu = false;                           // Is menu visible
+RectF g_menuRect(15.0f, 40.0f, 260.0f, 225.0f);          // Menu area (rectangle)
+bool g_isEditingUrl = false;                               // Are we editing update URL
+
+// === Dynamic colors - smoothly change hue over time ===
 Color GetDynamicAccent() {
-    float time = (float)GetTickCount64() / 1000.0f;
-    int r = (int)(127 + 127 * sin(time));
-    int g = (int)(127 + 127 * sin(time + 2.0f));
-    int b = 255;
+    float time = (float)GetTickCount64() / 1000.0f;  // Time in seconds since system start
+    int r = (int)(127 + 127 * sin(time));              // Red waves from 0 to 254
+    int g = (int)(127 + 127 * sin(time + 2.0f));       // Green phase-shifted
+    int b = 255;                                        // Blue constant
     return Color(255, r, g, b);
 }
 
-#define COLOR_BG      Color(255, 10, 10, 10)
+#define COLOR_BG      Color(255, 10, 10, 10)  // Window background color (near black)
 
+// === Bridge mode names ===
 std::wstring g_modeNames[] = { L"OFF", L"Godbridge", L"Moonwalk", L"Breezily", L"Speedbridge", L"Telly Bridge", L"Andromeda", L"Jumpbridge", L"Ninja", L"Diagonal", L"Warp", L"Staircase", L"ICL" };
 
+// === Profile system ===
+const int MAX_PROFILES = 5;
+int g_currentProfile = 0;
+std::wstring g_profileNames[MAX_PROFILES] = { L"Default", L"PVP", L"Bridge", L"UHC", L"Custom" };
+bool g_isEditingProfile = false;
+
+// === std::string to std::wstring conversion ===
 std::wstring ToWString(std::string s) { return std::wstring(s.begin(), s.end()); }
 
+// === Calculate CPU load from idle/total times ===
 static float CalculateCPULoad(unsigned __int64 idleTicks, unsigned __int64 totalTicks) {
-    static unsigned __int64 _pTotal = 0, _pIdle = 0;
-    unsigned __int64 totalSince = totalTicks - _pTotal;
+    static unsigned __int64 _pTotal = 0, _pIdle = 0;  // Previous values
+    unsigned __int64 totalSince = totalTicks - _pTotal; // Difference since last measurement
     unsigned __int64 idleSince = idleTicks - _pIdle;
     float ret = (totalSince > 0) ? 1.0f - ((float)idleSince / totalSince) : 0.0f;
-    _pTotal = totalTicks; _pIdle = idleTicks;
+    _pTotal = totalTicks; _pIdle = idleTicks;  // Save for next time
     return ret;
 }
+// === FILETIME to 64-bit integer conversion ===
 static unsigned __int64 FT2I64(const FILETIME& ft) { return (((unsigned __int64)ft.dwHighDateTime) << 32) | (unsigned __int64)ft.dwLowDateTime; }
 
+// === Thread - update CPU/RAM load every second ===
 void UpdateSystemUsage() {
-    while (true) {
+    while (g_appRunning) {
         MEMORYSTATUSEX mem; mem.dwLength = sizeof(mem);
-        GlobalMemoryStatusEx(&mem); g_ramLoad = (int)mem.dwMemoryLoad;
+        GlobalMemoryStatusEx(&mem); g_ramLoad = (int)mem.dwMemoryLoad;  // RAM usage %
         FILETIME idle, kern, user;
         if (GetSystemTimes(&idle, &kern, &user)) g_cpuLoad = (int)(CalculateCPULoad(FT2I64(idle), FT2I64(kern) + FT2I64(user)) * 100);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));  // Wait 1s
     }
 }
 
+// === Render update window (GDI+) ===
 void RenderUpdateUI(HWND hwnd) {
     PAINTSTRUCT ps; HDC hdc = BeginPaint(hwnd, &ps);
     RECT rc; GetClientRect(hwnd, &rc);
+    // Double buffering - draw in memory first, then copy to screen
     HDC memDC = CreateCompatibleDC(hdc); HBITMAP memBm = CreateCompatibleBitmap(hdc, rc.right, rc.bottom);
     SelectObject(memDC, memBm); Graphics g(memDC);
     g.SetSmoothingMode(SmoothingModeAntiAlias); g.SetTextRenderingHint(TextRenderingHintAntiAlias);
@@ -124,49 +165,145 @@ void RenderUpdateUI(HWND hwnd) {
     Pen btnP(GetDynamicAccent(), 2.0f);
     StringFormat sf; sf.SetAlignment(StringAlignmentCenter);
 
+    // Text "NEW UPDATE AVAILABLE"
     g.DrawString(L"NEW UPDATE AVAILABLE!", -1, &fBig, PointF((REAL)rc.right / 2.0f, 40.0f), &sf, &accent);
     std::wstring info = L"Version " + g_newVersion + L" is ready.";
     g.DrawString(info.c_str(), -1, &fSmall, PointF((REAL)rc.right / 2.0f, 90.0f), &sf, &white);
 
+    // Button "DOWNLOAD NOW"
     RectF btnRect((REAL)rc.right / 2.0f - 100.0f, 150.0f, 200.0f, 45.0f);
     g.FillRectangle(&btnB, btnRect);
     g.DrawRectangle(&btnP, btnRect);
     g.DrawString(L"DOWNLOAD NOW", -1, &fSmall, PointF((REAL)rc.right / 2.0f, 162.0f), &sf, &white);
 
+    // Copy from memory to screen
     BitBlt(hdc, 0, 0, rc.right, rc.bottom, memDC, 0, 0, SRCCOPY);
     DeleteObject(memBm); DeleteDC(memDC); EndPaint(hwnd, &ps);
 }
 
+// === Update window procedure (message handling) ===
 LRESULT CALLBACK UpdateWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     if (uMsg == WM_PAINT) RenderUpdateUI(hwnd);
     if (uMsg == WM_LBUTTONDOWN) {
         int x = LOWORD(lParam), y = HIWORD(lParam);
+        // Click "DOWNLOAD NOW" button -> open URL in browser
         if (x > 100 && x < 300 && y > 150 && y < 195) { ShellExecuteW(0, L"open", g_downloadUrl.c_str(), 0, 0, SW_SHOWNORMAL); DestroyWindow(hwnd); }
     }
-    if (uMsg == WM_KEYDOWN && wParam == VK_ESCAPE) DestroyWindow(hwnd);
+    if (uMsg == WM_KEYDOWN && wParam == VK_ESCAPE) DestroyWindow(hwnd);  // ESC closes window
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
+// === Check if URL is empty or contains only whitespace ===
+bool IsUrlEmptyOrWhitespace(const std::wstring& str) {
+    if (str.empty()) return true;
+    return std::all_of(str.begin(), str.end(), [](wchar_t ch) { return iswspace(ch); });
+}
+
+// === Forward declarations ===
+void SaveSettings();
+
+// === Save single profile to registry ===
+void SaveProfile(int index) {
+    HKEY hK;
+    std::wstring path = L"Software\\MakarClicker\\Profiles\\Profile_" + std::to_wstring(index);
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, 0, REG_OPTION_NON_VOLATILE, KEY_WRITE, 0, &hK, 0) == ERROR_SUCCESS) {
+        DWORD dC = (DWORD)g_cps.load();
+        RegSetValueExW(hK, L"CPS", 0, REG_DWORD, (const BYTE*)&dC, 4);
+        RegSetValueExW(hK, L"BindPVP", 0, REG_DWORD, (const BYTE*)&g_bindPVP, 4);
+        RegSetValueExW(hK, L"BindBridge", 0, REG_DWORD, (const BYTE*)&g_bindBridge, 4);
+        DWORD dA = (DWORD)g_windowAlpha;
+        RegSetValueExW(hK, L"Alpha", 0, REG_DWORD, (const BYTE*)&dA, 4);
+        RegSetValueExW(hK, L"UpdateUrl", 0, REG_SZ, (const BYTE*)UPDATE_JSON_URL.c_str(), (DWORD)(UPDATE_JSON_URL.length() + 1) * sizeof(wchar_t));
+        RegSetValueExW(hK, L"Name", 0, REG_SZ, (const BYTE*)g_profileNames[index].c_str(), (DWORD)(g_profileNames[index].length() + 1) * sizeof(wchar_t));
+        RegCloseKey(hK);
+    }
+}
+
+// === Load single profile from registry ===
+void LoadProfile(int index) {
+    if (index < 0 || index >= MAX_PROFILES) return;
+    HKEY hK;
+    std::wstring path = L"Software\\MakarClicker\\Profiles\\Profile_" + std::to_wstring(index);
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, KEY_READ, &hK) == ERROR_SUCCESS) {
+        DWORD dC, dP, dB, dA, dS = 4;
+        if (RegQueryValueExW(hK, L"CPS", 0, 0, (LPBYTE)&dC, &dS) == ERROR_SUCCESS) g_cps = (float)dC;
+        if (RegQueryValueExW(hK, L"BindPVP", 0, 0, (LPBYTE)&dP, &dS) == ERROR_SUCCESS) g_bindPVP = dP;
+        if (RegQueryValueExW(hK, L"BindBridge", 0, 0, (LPBYTE)&dB, &dS) == ERROR_SUCCESS) g_bindBridge = dB;
+        if (RegQueryValueExW(hK, L"Alpha", 0, 0, (LPBYTE)&dA, &dS) == ERROR_SUCCESS) {
+            g_windowAlpha = (BYTE)dA;
+            if (g_mainHwnd) SetLayeredWindowAttributes(g_mainHwnd, 0, g_windowAlpha, LWA_ALPHA);
+        }
+        wchar_t urlBuffer[512] = { 0 }; DWORD urlSize = sizeof(urlBuffer);
+        if (RegQueryValueExW(hK, L"UpdateUrl", 0, 0, (LPBYTE)urlBuffer, &urlSize) == ERROR_SUCCESS) {
+            UPDATE_JSON_URL = urlBuffer;
+            if (IsUrlEmptyOrWhitespace(UPDATE_JSON_URL)) UPDATE_JSON_URL = DEFAULT_UPDATE_URL;
+        }
+        wchar_t nameBuffer[64] = { 0 }; DWORD nameSize = sizeof(nameBuffer);
+        if (RegQueryValueExW(hK, L"Name", 0, 0, (LPBYTE)nameBuffer, &nameSize) == ERROR_SUCCESS) {
+            g_profileNames[index] = nameBuffer;
+        }
+        RegCloseKey(hK);
+    }
+}
+
+// === Switch to another profile (saves current, loads new) ===
+void SwitchProfile(HWND hwnd, int index) {
+    if (index < 0 || index >= MAX_PROFILES || index == g_currentProfile) return;
+    SaveProfile(g_currentProfile);
+    g_currentProfile = index;
+    LoadProfile(index);
+    UnregisterHotKey(hwnd, 1); UnregisterHotKey(hwnd, 2);
+    RegisterHotKey(hwnd, 1, 0, g_bindPVP); RegisterHotKey(hwnd, 2, 0, g_bindBridge);
+    HKEY hK;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\MakarClicker", 0, KEY_WRITE, &hK) == ERROR_SUCCESS) {
+        DWORD dIdx = (DWORD)index; RegSetValueExW(hK, L"CurrentProfile", 0, REG_DWORD, (const BYTE*)&dIdx, 4);
+        RegCloseKey(hK);
+    }
+    SaveSettings();
+}
+
+// === Load all profile names from registry on startup ===
+void InitProfiles() {
+    for (int i = 0; i < MAX_PROFILES; i++) {
+        HKEY hK;
+        std::wstring path = L"Software\\MakarClicker\\Profiles\\Profile_" + std::to_wstring(i);
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, KEY_READ, &hK) == ERROR_SUCCESS) {
+            wchar_t nameBuffer[64] = { 0 }; DWORD nameSize = sizeof(nameBuffer);
+            if (RegQueryValueExW(hK, L"Name", 0, 0, (LPBYTE)nameBuffer, &nameSize) == ERROR_SUCCESS) {
+                g_profileNames[i] = nameBuffer;
+            }
+            RegCloseKey(hK);
+        }
+    }
+}
+
+// === Check for updates via HTTP ===
 void CheckForUpdates(HWND hwnd) {
     HINTERNET hS = WinHttpOpen(L"MakarUpdate/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hS) return;
 
+    // Use custom URL if set, otherwise default
+    std::wstring targetUrl = IsUrlEmptyOrWhitespace(UPDATE_JSON_URL) ? DEFAULT_UPDATE_URL : UPDATE_JSON_URL;
+
     URL_COMPONENTS urlC = { 0 }; urlC.dwStructSize = sizeof(urlC); urlC.dwHostNameLength = (DWORD)-1; urlC.dwUrlPathLength = (DWORD)-1;
-    if (WinHttpCrackUrl(UPDATE_JSON_URL.c_str(), (DWORD)UPDATE_JSON_URL.length(), 0, &urlC)) {
+    if (WinHttpCrackUrl(targetUrl.c_str(), (DWORD)targetUrl.length(), 0, &urlC)) {
         if (urlC.lpszHostName == nullptr || urlC.dwHostNameLength == 0) { WinHttpCloseHandle(hS); return; }
         HINTERNET hC = WinHttpConnect(hS, std::wstring(urlC.lpszHostName, urlC.dwHostNameLength).c_str(), INTERNET_DEFAULT_HTTPS_PORT, 0);
         HINTERNET hR = WinHttpOpenRequest(hC, L"GET", urlC.lpszUrlPath, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
         if (hR && WinHttpSendRequest(hR, 0, 0, 0, 0, 0, 0) && WinHttpReceiveResponse(hR, 0)) {
             std::string resp; DWORD dwAvail = 0, dwRead = 0;
+            // Read response in a loop (may arrive in chunks)
             while (WinHttpQueryDataAvailable(hR, &dwAvail) && dwAvail > 0) {
                 char* buf = new char[dwAvail + 1];
                 if (WinHttpReadData(hR, buf, dwAvail, &dwRead)) { buf[dwRead] = 0; resp += buf; }
                 delete[] buf;
             }
+            // Parse JSON: search for "version" and "url"
             size_t vPos = resp.find("\"version\": \""), uPos = resp.find("\"url\": \"");
             if (vPos != std::string::npos && uPos != std::string::npos) {
                 std::string v = resp.substr(vPos + 12, resp.find("\"", vPos + 12) - (vPos + 12));
                 std::string u = resp.substr(uPos + 8, resp.find("\"", uPos + 8) - (uPos + 8));
+                // If new version > current -> send WM_SHOW_UPDATE
                 if (std::stod(v) > std::stod(std::string(CURRENT_VERSION.begin(), CURRENT_VERSION.end()))) {
                     g_newVersion = std::wstring(v.begin(), v.end()); g_downloadUrl = std::wstring(u.begin(), u.end());
                     PostMessage(hwnd, WM_SHOW_UPDATE, 0, 0);
@@ -178,23 +315,29 @@ void CheckForUpdates(HWND hwnd) {
     WinHttpCloseHandle(hS);
 }
 
+// === Fetch hardware and system info ===
 void FetchHardwareInfo() {
+    // Read CPU name from Windows registry
     HKEY hK; if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 0, KEY_READ, &hK) == ERROR_SUCCESS) {
         wchar_t b[256]; DWORD s = sizeof(b); if (RegQueryValueExW(hK, L"ProcessorNameString", 0, 0, (LPBYTE)b, &s) == ERROR_SUCCESS) {
-            g_cpuInfo = b; g_cpuInfo.erase(0, g_cpuInfo.find_first_not_of(L" "));
+            g_cpuInfo = b; g_cpuInfo.erase(0, g_cpuInfo.find_first_not_of(L" "));  // Remove leading spaces
         } RegCloseKey(hK);
     }
+    // Get GPU name via EnumDisplayDevices
     DISPLAY_DEVICEW dd; dd.cb = sizeof(dd); if (EnumDisplayDevicesW(0, 0, &dd, 0)) g_gpuInfo = dd.DeviceString;
+    // Get total RAM amount
     MEMORYSTATUSEX memStatus;
     memStatus.dwLength = sizeof(memStatus);
     if (GlobalMemoryStatusEx(&memStatus)) {
-        int totalGB = (int)((memStatus.ullTotalPhys + (1024 * 1024 * 1024) - 1) / (1024 * 1024 * 1024));
+        int totalGB = (int)((memStatus.ullTotalPhys + (1024 * 1024 * 1024) - 1) / (1024 * 1024 * 1024));  // Round up to GB
         g_ramInfo = std::to_wstring(totalGB) + L" GB System Memory";
     }
+    // Get computer name
     wchar_t cB[MAX_COMPUTERNAME_LENGTH + 1]; DWORD cS = sizeof(cB) / sizeof(cB[0]); if (GetComputerNameW(cB, &cS)) g_computerName = cB;
+    // Get local IP address (IPv4)
     WSADATA wsa; if (WSAStartup(MAKEWORD(2, 2), &wsa) == 0) {
         char hn[256]; gethostname(hn, 256);
-        addrinfo* res, hints = { 0 }; hints.ai_family = AF_INET;
+        addrinfo* res, hints = { 0 }; hints.ai_family = AF_INET;  // IPv4 only
         if (getaddrinfo(hn, 0, &hints, &res) == 0) {
             char ip[16]; inet_ntop(AF_INET, &((sockaddr_in*)res->ai_addr)->sin_addr, ip, 16);
             std::string s(ip); g_ipAddress = std::wstring(s.begin(), s.end());
@@ -203,54 +346,100 @@ void FetchHardwareInfo() {
     }
 }
 
+// === Save settings to Windows registry ===
 void SaveSettings() {
+    if (IsUrlEmptyOrWhitespace(UPDATE_JSON_URL)) {
+        UPDATE_JSON_URL = DEFAULT_UPDATE_URL;
+    }
+
     HKEY hK; if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\MakarClicker", 0, 0, REG_OPTION_NON_VOLATILE, KEY_WRITE, 0, &hK, 0) == ERROR_SUCCESS) {
-        DWORD dC = (DWORD)g_cps; RegSetValueExW(hK, L"CPS", 0, REG_DWORD, (const BYTE*)&dC, 4);
+        DWORD dC = (DWORD)g_cps.load(); RegSetValueExW(hK, L"CPS", 0, REG_DWORD, (const BYTE*)&dC, 4);
         RegSetValueExW(hK, L"BindPVP", 0, REG_DWORD, (const BYTE*)&g_bindPVP, 4);
         RegSetValueExW(hK, L"BindBridge", 0, REG_DWORD, (const BYTE*)&g_bindBridge, 4);
         DWORD dAlpha = (DWORD)g_windowAlpha; RegSetValueExW(hK, L"Alpha", 0, REG_DWORD, (const BYTE*)&dAlpha, 4);
+        RegSetValueExW(hK, L"UpdateUrl", 0, REG_SZ, (const BYTE*)UPDATE_JSON_URL.c_str(), (DWORD)(UPDATE_JSON_URL.length() + 1) * sizeof(wchar_t));
+        DWORD dProf = (DWORD)g_currentProfile; RegSetValueExW(hK, L"CurrentProfile", 0, REG_DWORD, (const BYTE*)&dProf, 4);
         RegCloseKey(hK);
     }
+    SaveProfile(g_currentProfile);
 }
 
+// === Load settings from Windows registry ===
 void LoadSettings() {
+    InitProfiles();
     HKEY hK; if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\MakarClicker", 0, KEY_READ, &hK) == ERROR_SUCCESS) {
-        DWORD dC, dP, dB, dA, dS = 4;
-        if (RegQueryValueExW(hK, L"CPS", 0, 0, (LPBYTE)&dC, &dS) == ERROR_SUCCESS) g_cps = (float)dC;
-        if (RegQueryValueExW(hK, L"BindPVP", 0, 0, (LPBYTE)&dP, &dS) == ERROR_SUCCESS) g_bindPVP = dP;
-        if (RegQueryValueExW(hK, L"BindBridge", 0, 0, (LPBYTE)&dB, &dS) == ERROR_SUCCESS) g_bindBridge = dB;
-        if (RegQueryValueExW(hK, L"Alpha", 0, 0, (LPBYTE)&dA, &dS) == ERROR_SUCCESS) g_windowAlpha = (BYTE)dA;
+        DWORD dProf = 0, dS = 4;
+        if (RegQueryValueExW(hK, L"CurrentProfile", 0, 0, (LPBYTE)&dProf, &dS) == ERROR_SUCCESS) {
+            g_currentProfile = (int)dProf;
+            if (g_currentProfile < 0 || g_currentProfile >= MAX_PROFILES) g_currentProfile = 0;
+        }
         RegCloseKey(hK);
     }
+    LoadProfile(g_currentProfile);
 }
 
+// === Main clicker engine (runs in separate thread) ===
 void ClickerEngine() {
-    std::default_random_engine gen;
-    while (true) {
-        if (GetForegroundWindow() != g_mainHwnd && GetForegroundWindow() != NULL) {
-            if (g_isClicking) {
-                std::uniform_real_distribution<float> dist(g_cps * 0.85f, g_cps * 1.15f);
-                float wave = sin(GetTickCount64() / 1000.0f) * 2.0f;
-                int d = (int)(1000.0f / (dist(gen) + wave));
+    // Initialize random number generator
+    std::random_device rd;
+    std::mt19937 gen(rd());
 
-                INPUT i[2] = { 0 };
-                i[0].type = INPUT_MOUSE; i[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
-                i[1].type = INPUT_MOUSE; i[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
-                SendInput(1, &i[0], sizeof(INPUT)); std::this_thread::sleep_for(std::chrono::milliseconds(20));
-                SendInput(1, &i[1], sizeof(INPUT));
+    // Random distributions simulating human behavior
+    std::normal_distribution<float> cpsNoise(0.0f, 1.8f);          // CPS noise (standard deviation 1.8)
+    std::normal_distribution<float> holdTime(42.0f, 15.0f);        // Key hold time ~ skewed short (clamped 20-90)
+    std::uniform_real_distribution<float> skipChance(0.0f, 1.0f);  // Chance to skip a click
 
-                g_clickTimestamps.push_back(GetTickCount64());
-                std::this_thread::sleep_for(std::chrono::milliseconds(max(1, d - 20)));
-            }
-            else if (g_bridgeMode > 0) {
-                INPUT i[2] = { 0 }; i[0].type = INPUT_MOUSE; i[0].mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
-                i[1].type = INPUT_MOUSE; i[1].mi.dwFlags = MOUSEEVENTF_RIGHTUP;
-                SendInput(1, &i[0], sizeof(INPUT)); std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                SendInput(1, &i[1], sizeof(INPUT));
+    std::uniform_int_distribution<int> burstLen(2, 5);             // Clicks per burst phase
+    std::uniform_real_distribution<float> burstMult(0.85f, 1.15f); // Burst CPS multiplier
 
-                g_clickTimestamps.push_back(GetTickCount64());
-                std::this_thread::sleep_for(std::chrono::milliseconds(32));
-            }
+    float currentDrift = 1.0f;
+    int burstRemaining = 0;
+    float currentBurst = 1.0f;
+    auto lastDriftUpdate = std::chrono::steady_clock::now();
+
+    // === Function performing a single click ===
+    auto doClick = [&](DWORD flags) {
+        float base = g_cps.load();
+        auto now = std::chrono::steady_clock::now();
+
+        // Smooth CPS drift using sine waves (continuous, no abrupt jumps)
+        float t = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastDriftUpdate).count() / 1000.0f;
+        currentDrift = 1.0f + 0.05f * sinf(t * 0.5f) + 0.03f * sinf(t * 1.3f);
+
+        if (burstRemaining <= 0) { burstRemaining = burstLen(gen); currentBurst = burstMult(gen); }
+
+        float targetCPS = std::clamp(base * currentDrift * currentBurst + cpsNoise(gen), 1.0f, 50.0f);
+        float holdMs = std::clamp(holdTime(gen), 20.0f, 90.0f);         // Random hold time (skewed short)
+        burstRemaining--;
+        // 98% chance to click (2% skip - simulate natural pauses)
+        if (skipChance(gen) >= 0.02f) {
+            // Press button
+            INPUT down{0}; down.type = INPUT_MOUSE; down.mi.dwFlags = flags;
+            SendInput(1, &down, sizeof(INPUT));
+            std::this_thread::sleep_for(std::chrono::milliseconds((int)holdMs));  // Hold
+            // Release button
+            INPUT up{0}; up.type = INPUT_MOUSE; up.mi.dwFlags = (flags == MOUSEEVENTF_LEFTDOWN) ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP;
+            SendInput(1, &up, sizeof(INPUT));
+
+            // Save click timestamp (for real CPS measurement)
+            { std::lock_guard<std::mutex> lk(g_tsMutex); g_clickTimestamps.push_back(GetTickCount64()); }
+        }
+
+        // Wait remaining time to match target CPS
+        int totalMs = (int)(1000.0f / targetCPS);
+        int elapsedMs = (int)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - now).count();
+        int sleepMs = totalMs - elapsedMs;
+        if (sleepMs > 0) std::this_thread::sleep_for(std::chrono::milliseconds(sleepMs));
+    };
+
+    // === Main engine loop ===
+    while (g_appRunning) {
+        HWND fg = GetForegroundWindow();
+        bool active = (fg != g_mainHwnd && fg != NULL);  // Only click when the window is not ours
+
+        if (active) {
+            if (g_isClicking.load()) doClick(MOUSEEVENTF_LEFTDOWN);   // PVP mode - left button
+            else if (g_bridgeMode.load() > 0) doClick(MOUSEEVENTF_RIGHTDOWN); // Bridge mode - right button
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
@@ -271,12 +460,11 @@ void RenderUI(HWND hwnd) {
     g.Clear(COLOR_BG);
 
     ULONGLONG now = GetTickCount64();
-    g_clickTimestamps.erase(std::remove_if(g_clickTimestamps.begin(), g_clickTimestamps.end(),
-        [now](ULONGLONG ts) { return now - ts > 1000; }), g_clickTimestamps.end());
+    { std::lock_guard<std::mutex> lk(g_tsMutex); g_clickTimestamps.erase(std::remove_if(g_clickTimestamps.begin(), g_clickTimestamps.end(), [now](ULONGLONG ts) { return now - ts > 1000; }), g_clickTimestamps.end()); }
     g_realCPS = (float)g_clickTimestamps.size();
 
     Color dynamicAccent = GetDynamicAccent();
-    SolidBrush white(Color(255, 255, 255)), gray(Color(180, 150, 150, 150)), dGray(Color(100, 50, 50, 50)), barBg(Color(40, 20, 20, 20));
+    SolidBrush white(Color(255, 255, 255)), gray(Color(180, 150, 150, 150)), dGray(Color(100, 50, 50, 50)), barBg(Color(40, 20, 20, 20)), accent(dynamicAccent);
     FontFamily ff(L"Segoe UI");
     Font fL(&ff, 42, FontStyleBold, UnitPixel);
     Font fM(&ff, 18, FontStyleRegular, UnitPixel);
@@ -288,7 +476,6 @@ void RenderUI(HWND hwnd) {
     g.FillRectangle(&barBg, 0.0f, 0.0f, (REAL)rc.right, (REAL)TOP_BAR_HEIGHT);
     g.DrawString(L"X", -1, &fSH, PointF((REAL)rc.right - 25.0f, 8.0f), &sfC, &white);
     g.DrawString(L"-", -1, &fSH, PointF((REAL)rc.right - 55.0f, 8.0f), &sfC, &white);
-
 
     Pen gearPen(g_showSettingsMenu ? dynamicAccent : Color(180, 150, 150, 150), 2.0f);
     g.DrawEllipse(&gearPen, 15, 10, 14, 14);
@@ -313,12 +500,12 @@ void RenderUI(HWND hwnd) {
             g.DrawLine(&pLine, (REAL)p.x + 1.5f, (REAL)p.y + 1.5f, (REAL)g_mousePos.x, (REAL)g_mousePos.y);
     }
 
-    g.DrawString(L"MAKAR CLICKER", -1, &fL, PointF(midX, 75.0f), &sfC, new SolidBrush(dynamicAccent));
+    g.DrawString(L"MAKAR CLICKER", -1, &fL, PointF(midX, 75.0f), &sfC, &accent);
     g.DrawString(L"SPEED CONTROL", -1, &fS, PointF(midX, 140.0f), &sfC, &gray);
 
     float sliderX = midX - 150.0f;
     float sliderW = 300.0f;
-    float sPos = (g_cps - 1.0f) / 29.0f * sliderW;
+    float sPos = (g_cps.load() - 1.0f) / 29.0f * sliderW;
 
     Pen penBack(Color(40, 60, 60, 60), 8.0f);
     penBack.SetStartCap(LineCapRound); penBack.SetEndCap(LineCapRound);
@@ -338,49 +525,51 @@ void RenderUI(HWND hwnd) {
     g.FillEllipse(&handleInner, (REAL)(sliderX + sPos - 10.0f), 175.0f, 20.0f, 20.0f);
     g.DrawEllipse(&handleBorder, (REAL)(sliderX + sPos - 10.0f), 175.0f, 20.0f, 20.0f);
 
-    std::wstring cpsText = std::to_wstring((int)g_cps) + L" CPS";
+    std::wstring cpsText = std::to_wstring((int)g_cps.load()) + L" CPS";
     g.DrawString(cpsText.c_str(), -1, &fB, PointF(midX, 155.0f), &sfC, &white);
 
     std::wstring realCpsDisplay = L"REAL SPEED: " + std::to_wstring((int)g_realCPS) + L" CPS";
-    g.DrawString(realCpsDisplay.c_str(), -1, &fS, PointF(midX, 230.0f), &sfC, new SolidBrush(dynamicAccent));
+    g.DrawString(realCpsDisplay.c_str(), -1, &fS, PointF(midX, 230.0f), &sfC, &accent);
 
     g.DrawString(L"PVP BIND", -1, &fM, PointF(midX - 70.0f, 265.0f), &sfC, &gray);
-    g.DrawString(GetKeyNameStr(g_bindPVP).c_str(), -1, &fB, PointF(midX + 70.0f, 265.0f), &sfC, g_isBindingPVP ? new SolidBrush(dynamicAccent) : &white);
+    g.DrawString(GetKeyNameStr(g_bindPVP).c_str(), -1, &fB, PointF(midX + 70.0f, 265.0f), &sfC, g_isBindingPVP ? &accent : &white);
     g.DrawString(L"BRIDGE BIND", -1, &fM, PointF(midX - 70.0f, 315.0f), &sfC, &gray);
-    g.DrawString(GetKeyNameStr(g_bindBridge).c_str(), -1, &fB, PointF(midX + 70.0f, 315.0f), &sfC, g_isBindingBridge ? new SolidBrush(dynamicAccent) : &white);
+    g.DrawString(GetKeyNameStr(g_bindBridge).c_str(), -1, &fB, PointF(midX + 70.0f, 315.0f), &sfC, g_isBindingBridge ? &accent : &white);
 
-    std::wstring modeText = L"MODE: " + g_modeNames[g_bridgeMode];
-    g.DrawString(modeText.c_str(), -1, &fB, PointF(midX, 375.0f), &sfC, new SolidBrush(dynamicAccent));
+    std::wstring modeText = L"MODE: " + g_modeNames[g_bridgeMode.load()];
+    g.DrawString(modeText.c_str(), -1, &fB, PointF(midX, 365.0f), &sfC, &accent);
 
-    RectF stRect(midX - 180.0f, 435.0f, 360.0f, 60.0f);
+    std::wstring profileText = L"PROFILE:  <  " + g_profileNames[g_currentProfile] + L"  >";
+    g.DrawString(profileText.c_str(), -1, &fM, PointF(midX, 395.0f), &sfC, g_isEditingProfile ? (Brush*)&accent : (Brush*)&gray);
+
+    RectF stRect(midX - 180.0f, 440.0f, 360.0f, 60.0f);
     SolidBrush stBg(Color(35, 255, 255, 255));
-    Pen stBorder(g_isClicking ? Color(255, 0, 255, 0) : dynamicAccent, 2.0f);
+    Pen stBorder(g_isClicking.load() ? Color(255, 0, 255, 0) : dynamicAccent, 2.0f);
     g.FillRectangle(&stBg, stRect);
     g.DrawRectangle(&stBorder, stRect);
-    g.DrawString(g_isClicking ? L"ENGINE ACTIVE" : L"ENGINE STANDBY", -1, &fB, PointF(midX, 453.0f), &sfC, &white);
+    g.DrawString(g_isClicking.load() ? L"ENGINE ACTIVE" : L"ENGINE STANDBY", -1, &fB, PointF(midX, 453.0f), &sfC, &white);
 
     if (g_showDebug) {
         Pen sep(Color(100, 255, 255, 255), 1.0f);
-        g.DrawLine(&sep, 50.0f, 525.0f, (REAL)rc.right - 50.0f, 525.0f);
-        g.DrawString(L"DEBUG / SYSTEM MONITOR", -1, &fS, PointF(midX, 535.0f), &sfC, new SolidBrush(dynamicAccent));
-        g.DrawString((L"CPU: " + g_cpuInfo).c_str(), -1, &fS, PointF(midX, 555.0f), &sfC, &white);
-        g.DrawString((L"GPU: " + g_gpuInfo).c_str(), -1, &fS, PointF(midX, 572.0f), &sfC, &white);
-        g.DrawString((L"RAM: " + g_ramInfo).c_str(), -1, &fS, PointF(midX, 589.0f), &sfC, &white);
+        g.DrawLine(&sep, 50.0f, 535.0f, (REAL)rc.right - 50.0f, 535.0f);
+        g.DrawString(L"DEBUG / SYSTEM MONITOR", -1, &fS, PointF(midX, 545.0f), &sfC, &accent);
+        g.DrawString((L"CPU: " + g_cpuInfo).c_str(), -1, &fS, PointF(midX, 565.0f), &sfC, &white);
+        g.DrawString((L"GPU: " + g_gpuInfo).c_str(), -1, &fS, PointF(midX, 582.0f), &sfC, &white);
+        g.DrawString((L"RAM: " + g_ramInfo).c_str(), -1, &fS, PointF(midX, 599.0f), &sfC, &white);
         std::wstring loadTxt = L"LOAD -> CPU: " + std::to_wstring(g_cpuLoad) + L"% | RAM: " + std::to_wstring(g_ramLoad) + L"%";
-        g.DrawString(loadTxt.c_str(), -1, &fS, PointF(midX, 610.0f), &sfC, new SolidBrush(dynamicAccent));
+        g.DrawString(loadTxt.c_str(), -1, &fS, PointF(midX, 620.0f), &sfC, &accent);
         std::wstring footer = L"PC: " + g_computerName + L" | IP: " + g_ipAddress;
-        g.DrawString(footer.c_str(), -1, &fS, PointF(midX, 630.0f), &sfC, &gray);
+        g.DrawString(footer.c_str(), -1, &fS, PointF(midX, 640.0f), &sfC, &gray);
         std::wstring buildTxt = L"BUILD: " + BUILD_ID + L" | DATE: " + ToWString(B_DATE) + L" " + ToWString(B_TIME);
-        g.DrawString(buildTxt.c_str(), -1, &fS, PointF(midX, 655.0f), &sfC, new SolidBrush(dynamicAccent));
+        g.DrawString(buildTxt.c_str(), -1, &fS, PointF(midX, 665.0f), &sfC, &accent);
 
-        RectF sdRect(midX - 75.0f, 680.0f, 150.0f, 30.0f);
+        RectF sdRect(midX - 75.0f, 690.0f, 150.0f, 30.0f);
         SolidBrush sdBg(Color(180, 200, 0, 0));
         g.FillRectangle(&sdBg, sdRect);
         Pen whitePen(Color(255, 255, 255), 1.0f);
         g.DrawRectangle(&whitePen, sdRect);
-        g.DrawString(L"SELF DESTRUCT", -1, &fS, PointF(midX, 688.0f), &sfC, &white);
+        g.DrawString(L"SELF DESTRUCT", -1, &fS, PointF(midX, 698.0f), &sfC, &white);
     }
-
 
     if (g_showSettingsMenu) {
         SolidBrush menuBg(Color(245, 15, 15, 15));
@@ -401,17 +590,37 @@ void RenderUI(HWND hwnd) {
                 g.FillRectangle(&hoverBrush, g_menuRect.X + 5.0f, itemY, g_menuRect.Width - 10.0f, 24.0f);
             }
 
-            
             std::wstring renderText = isSelected ? L"[\u2713] " + options[i] : options[i];
             SolidBrush* textBrush = isSelected ? new SolidBrush(dynamicAccent) : &white;
-
             g.DrawString(renderText.c_str(), -1, &fS, PointF(g_menuRect.X + 15.0f, itemY + 3.0f), textBrush);
-
             if (isSelected) delete textBrush;
+        }
+
+        SolidBrush* titleBrush = g_isEditingUrl ? new SolidBrush(dynamicAccent) : &white;
+        g.DrawString(L"Custom Update Server", -1, &fS, PointF(g_menuRect.X + 12.0f, g_menuRect.Y + 153.0f), titleBrush);
+        if (g_isEditingUrl) delete titleBrush;
+
+        RectF inputRect(g_menuRect.X + 10.0f, g_menuRect.Y + 170.0f, g_menuRect.Width - 20.0f, 25.0f);
+        SolidBrush inputBg(Color(40, 255, 255, 255));
+        g.FillRectangle(&inputBg, inputRect);
+
+        Pen fieldPen(g_isEditingUrl ? dynamicAccent : Color(150, 100, 100, 100), 1.5f);
+        g.DrawRectangle(&fieldPen, inputRect);
+
+        std::wstring dispUrl = UPDATE_JSON_URL;
+        if (dispUrl.length() > 34 && !g_isEditingUrl) {
+            dispUrl = dispUrl.substr(0, 31) + L"...";
+        }
+        else if (dispUrl.length() > 34 && g_isEditingUrl) {
+            dispUrl = L"..." + dispUrl.substr(dispUrl.length() - 31);
+        }
+
+        if (!dispUrl.empty()) {
+            g.DrawString(dispUrl.c_str(), -1, &fS, PointF(inputRect.X + 5.0f, inputRect.Y + 5.0f), &white);
         }
     }
 
-    float finalBottom = g_showDebug ? 720.0f : 515.0f;
+    float finalBottom = g_showDebug ? 730.0f : 525.0f;
     if (!g_showDebug) g.DrawString(L"", -1, &fS, PointF(midX, finalBottom - 20.0f), &sfC, &dGray);
     std::wstring copyTxt = L"COPYRIGHT 2026 " + g_licenseUser;
     g.DrawString(copyTxt.c_str(), -1, &fS, PointF(midX, finalBottom), &sfC, &gray);
@@ -449,46 +658,66 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     case WM_LBUTTONDOWN: {
         int x = LOWORD(lParam), y = HIWORD(lParam);
 
-
         if (g_showSettingsMenu && x >= g_menuRect.X && x <= g_menuRect.X + g_menuRect.Width) {
             for (int i = 0; i < 5; i++) {
                 float itemY = g_menuRect.Y + 10.0f + (i * 28.0f);
                 if (y >= itemY && y < itemY + 25.0f) {
                     switch (i) {
-                    case 0: g_windowAlpha = 255; break; // 100%
-                    case 1: g_windowAlpha = 230; break; // 90%
-                    case 2: g_windowAlpha = 191; break; // 75%
-                    case 3: g_windowAlpha = 153; break; // 60%
-                    case 4: g_windowAlpha = 128; break; // 50%
+                    case 0: g_windowAlpha = 255; break;
+                    case 1: g_windowAlpha = 230; break;
+                    case 2: g_windowAlpha = 191; break;
+                    case 3: g_windowAlpha = 153; break;
+                    case 4: g_windowAlpha = 128; break;
                     }
                     SetLayeredWindowAttributes(hwnd, 0, g_windowAlpha, LWA_ALPHA);
+
+                    if (g_isEditingUrl) {
+                        g_isEditingUrl = false;
+                        if (IsUrlEmptyOrWhitespace(UPDATE_JSON_URL)) UPDATE_JSON_URL = DEFAULT_UPDATE_URL;
+                    }
                     SaveSettings();
                     g_showSettingsMenu = false;
                     return 0;
                 }
             }
+
+            float inputY = g_menuRect.Y + 170.0f;
+            if (x >= g_menuRect.X + 10.0f && x <= g_menuRect.X + g_menuRect.Width - 10.0f &&
+                y >= inputY && y <= inputY + 25.0f) {
+                g_isEditingUrl = true;
+                return 0;
+            }
+        }
+
+        if (g_isEditingUrl) {
+            g_isEditingUrl = false;
+            if (IsUrlEmptyOrWhitespace(UPDATE_JSON_URL)) UPDATE_JSON_URL = DEFAULT_UPDATE_URL;
+            SaveSettings();
         }
 
         if (y <= TOP_BAR_HEIGHT) {
-
             if (x >= 10 && x <= 40) {
                 g_showSettingsMenu = !g_showSettingsMenu;
                 return 0;
             }
-            if (x >= (int)WIN_WIDTH - 40) PostQuitMessage(0);
+            if (x >= (int)WIN_WIDTH - 40) DestroyWindow(hwnd);
             else if (x >= (int)WIN_WIDTH - 70) ShowWindow(hwnd, SW_MINIMIZE);
             else { ReleaseCapture(); SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0); }
         }
         else if (y > 160 && y < 210) { g_isDraggingSlider = true; SetCapture(hwnd); g_showSettingsMenu = false; }
         else if (y > 250 && y < 300 && x > WIN_WIDTH / 2) { g_isBindingPVP = true; g_showSettingsMenu = false; }
         else if (y > 300 && y < 350 && x > WIN_WIDTH / 2) { g_isBindingBridge = true; g_showSettingsMenu = false; }
+        else if (y > 380 && y < 420) {
+            if (x > WIN_WIDTH / 2 - 130 && x < WIN_WIDTH / 2 - 80) SwitchProfile(hwnd, (g_currentProfile - 1 + MAX_PROFILES) % MAX_PROFILES);
+            else if (x > WIN_WIDTH / 2 + 80 && x < WIN_WIDTH / 2 + 130) SwitchProfile(hwnd, (g_currentProfile + 1) % MAX_PROFILES);
+            else g_showSettingsMenu = false;
+        }
         else {
-
             g_showSettingsMenu = false;
         }
 
-        if (g_showDebug && x > WIN_WIDTH / 2 - 75 && x < WIN_WIDTH / 2 + 75 && y > 680 && y < 710) {
-            PostQuitMessage(0);
+        if (g_showDebug && x > WIN_WIDTH / 2 - 75 && x < WIN_WIDTH / 2 + 75 && y > 690 && y < 720) {
+            DestroyWindow(hwnd);
         }
         return 0;
     }
@@ -500,15 +729,50 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             g_cps = std::clamp(1.0f + (((float)LOWORD(lParam) - start) / 300.0f) * 29.0f, 1.0f, 30.0f);
         } return 0;
     case WM_KEYDOWN:
+        if (g_isEditingUrl) {
+            if (wParam == 'V' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+                if (OpenClipboard(hwnd)) {
+                    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+                    if (hData) {
+                        wchar_t* pText = static_cast<wchar_t*>(GlobalLock(hData));
+                        if (pText) UPDATE_JSON_URL += pText;
+                        GlobalUnlock(hData);
+                    }
+                    CloseClipboard();
+                }
+                return 0;
+            }
+            if (wParam == VK_RETURN) {
+                g_isEditingUrl = false;
+                if (IsUrlEmptyOrWhitespace(UPDATE_JSON_URL)) UPDATE_JSON_URL = DEFAULT_UPDATE_URL;
+                SaveSettings();
+                return 0;
+            }
+        }
+
         if (g_isBindingPVP || g_isBindingBridge) {
             UnregisterHotKey(hwnd, g_isBindingPVP ? 1 : 2);
             if (g_isBindingPVP) g_bindPVP = (UINT)wParam; else g_bindBridge = (UINT)wParam;
             RegisterHotKey(hwnd, g_isBindingPVP ? 1 : 2, 0, (UINT)wParam);
             g_isBindingPVP = g_isBindingBridge = false; SaveSettings();
         } return 0;
+
+    case WM_CHAR:
+        if (g_isEditingUrl) {
+            wchar_t ch = (wchar_t)wParam;
+            if (ch == VK_BACK) {
+                if (!UPDATE_JSON_URL.empty()) UPDATE_JSON_URL.pop_back();
+            }
+            else if (ch >= 32 && ch != VK_RETURN) {
+                UPDATE_JSON_URL += ch;
+            }
+            return 0;
+        }
+        break;
+
     case WM_HOTKEY:
-        if (wParam == 1) { g_isClicking = !g_isClicking; g_bridgeMode = 0; }
-        if (wParam == 2) { g_bridgeMode = (g_bridgeMode + 1) % 13; g_isClicking = false; }
+        if (wParam == 1) { g_isClicking = !g_isClicking.load(); g_bridgeMode = 0; }
+        if (wParam == 2) { g_bridgeMode = (g_bridgeMode.load() + 1) % 13; g_isClicking = false; }
         if (wParam == 3) {
             g_showDebug = !g_showDebug;
             int nH = g_showDebug ? WIN_HEIGHT_LARGE : WIN_HEIGHT_SMALL;
@@ -521,7 +785,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             if (p.x < 0 || p.x > WIN_WIDTH) p.vx *= -1; if (p.y < 0 || p.y > WIN_HEIGHT_LARGE) p.vy *= -1;
         } InvalidateRect(hwnd, 0, 0); return 0;
     case WM_PAINT: RenderUI(hwnd); return 0;
-    case WM_DESTROY: PostQuitMessage(0); return 0;
+    case WM_DESTROY: g_appRunning = false; SaveSettings(); PostQuitMessage(0); return 0;
     }
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
@@ -529,6 +793,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 int WINAPI WinMain(_In_ HINSTANCE hI, _In_opt_ HINSTANCE hP, _In_ LPSTR lpC, _In_ int nS) {
     SetProcessDPIAware(); timeBeginPeriod(1);
     ULONG_PTR t; GdiplusStartupInput gs; GdiplusStartup(&t, &gs, 0);
+
     WNDCLASSEXW wc = { sizeof(WNDCLASSEXW), CS_HREDRAW | CS_VREDRAW, WindowProc, 0, 0, hI, 0, LoadCursor(0, IDC_ARROW), 0, 0, L"MakarClickerFix", 0 };
     RegisterClassExW(&wc);
     WNDCLASSEXW wcU = { sizeof(WNDCLASSEXW), CS_HREDRAW | CS_VREDRAW, UpdateWndProc, 0, 0, hI, 0, LoadCursor(0, IDC_ARROW), 0, 0, L"MakarUpdate", 0 };
