@@ -1,0 +1,8 @@
+Device-ID: GhostBlade-3726
+Masked-IP: StormBlade-5869
+Masked-PC: BrightCircuit-2672
+CPU: AMD Ryzen 5 2500U with Radeon Vega Mobile Gfx  
+GPU: AMD Radeon(TM) Vega 11 Graphics
+RAM: 15 GB System Memory
+CPS: 14
+Version: 7.5
