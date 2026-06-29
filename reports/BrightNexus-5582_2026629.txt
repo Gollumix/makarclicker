@@ -1,0 +1,8 @@
+Device-ID: BrightNexus-5582
+Masked-IP: PixelTiger-1538
+Masked-PC: DarkAnvil-7991
+CPU: AMD Ryzen 5 8400F 6-Core Processor             
+GPU: AMD Radeon RX 7600
+RAM: 32 GB System Memory
+CPS: 25
+Version: 7.5
