@@ -1,0 +1,8 @@
+Device-ID: PixelPhantom-8768
+Masked-IP: IronComet-3553
+Masked-PC: GhostPhantom-9946
+CPU: AMD Ryzen 5 5500                               
+GPU: NVIDIA GeForce RTX 3050
+RAM: 16 GB System Memory
+CPS: 14
+Version: 7.5
